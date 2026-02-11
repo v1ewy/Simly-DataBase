@@ -3,7 +3,36 @@
 #include <stdlib.h>
 
 
-void insert_db(char* line, FILE* output) {
+typedef enum {
+    well,
+    wearlow,
+    wearhigh,
+    broken,
+    notcheck
+} Status;
+
+typedef struct {
+    int day;
+    int month;
+    int year;
+} Date;
+
+typedef struct Node {
+    int unit_id;
+    char unit_model[256];
+    char carnum[16];
+    Date chk_date;
+    Status status;
+    char mechanic[256];
+    char driver[256];
+    struct Node* next;
+} Node;
+
+
+
+
+void insert_db(char* line, FILE* output, Node** head, int* size_db) {
+    Node* temp = NULL;
     char* args = line + 6;
 
     while (*args == ' ')
@@ -55,6 +84,7 @@ void insert_db(char* line, FILE* output) {
                 return;
             }
             has_unit_id = 1;
+
         }
         else if (strcmp(field, "unit_model") == 0) {
             if (has_unit_model) {
@@ -126,7 +156,7 @@ void insert_db(char* line, FILE* output) {
 
 
 
-void read_input(FILE* input, FILE* output) {
+void read_input(FILE* input, FILE* output, Node** head, int* db_size) {
     char* line = NULL;
     size_t cap = 0;
     
@@ -138,7 +168,7 @@ void read_input(FILE* input, FILE* output) {
         
         if (strncmp(line, "insert", 6) == 0 && line[6] == ' ')
         {
-            insert_db(line, output);
+            insert_db(line, output, head, db_size);
             
         }
         else if (strncmp(line, "select", 6) == 0 && line[6] == ' ')
@@ -166,6 +196,18 @@ void read_input(FILE* input, FILE* output) {
     free(line);
 }
 
+void free_db(Node* head) {
+    Node* tmp;
+
+    while (head) {
+        tmp = head;
+        head = head->next;
+        free(tmp);
+    }
+    
+    head = NULL;
+}
+
 int main(void) {
     FILE* input = fopen("input.txt", "r");
     FILE* output = fopen("output.txt", "w");
@@ -173,7 +215,12 @@ int main(void) {
         return 1;
     }
     
-    read_input(input, output);
+    Node* head = NULL;
+    int db_size = 0;
+    
+    read_input(input, output, &head, &db_size);
+    
+    free_db(head);
     
     fclose(input);
     fclose(output);
