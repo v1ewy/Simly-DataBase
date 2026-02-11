@@ -3,15 +3,108 @@
 #include <stdlib.h>
 
 
-void insert_db(char* args, FILE* output) {
-   
+void insert_db(char* line, FILE* output) {
+    char* args = line + 6;
+
+    while (*args == ' ')
+        args++;
+
+    if (*args == '\0') {
+        fprintf(output, "incorrect:'%.20s'\n", line);
+        return;
+    }
+
     char* copy = strdup(args);
     if (!copy) return;
 
-    char* token = strtok(copy, ",");
-    while (token != NULL) {
+    int has_unit_id = 0;
+    int has_unit_model = 0;
+    int has_car_id = 0;
+    int has_chk_date = 0;
+    int has_status = 0;
+    int has_mechanic = 0;
+    int has_driver = 0;
 
-        if (strchr(token, '=') == NULL) {
+    char* token = strtok(copy, ",");
+
+    while (token != NULL) {
+        while (*token == ' ')
+            token++;
+
+        char* eq = strchr(token, '=');
+        if (eq == NULL) {
+            fprintf(output, "incorrect:'%.20s'\n", line);
+            free(copy);
+            return;
+        }
+
+        *eq = '\0';
+        char* field = token;
+        char* value = eq + 1;
+
+        if (*field == '\0' || *value == '\0') {
+            fprintf(output, "incorrect:'%.20s'\n", line);
+            free(copy);
+            return;
+        }
+
+        if (strcmp(field, "unit_id") == 0) {
+            if (has_unit_id) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_unit_id = 1;
+        }
+        else if (strcmp(field, "unit_model") == 0) {
+            if (has_unit_model) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_unit_model = 1;
+        }
+        else if (strcmp(field, "car_id") == 0) {
+            if (has_car_id) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_car_id = 1;
+        }
+        else if (strcmp(field, "chk_date") == 0) {
+            if (has_chk_date) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_chk_date = 1;
+        }
+        else if (strcmp(field, "status") == 0) {
+            if (has_status) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_status = 1;
+        }
+        else if (strcmp(field, "mechanic") == 0) {
+            if (has_mechanic) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_mechanic = 1;
+        }
+        else if (strcmp(field, "driver") == 0) {
+            if (has_driver) {
+                fprintf(output, "incorrect:'%.20s'\n", line);
+                free(copy);
+                return;
+            }
+            has_driver = 1;
+        }
+        else {
             fprintf(output, "incorrect:'%.20s'\n", line);
             free(copy);
             return;
@@ -22,8 +115,15 @@ void insert_db(char* args, FILE* output) {
 
     free(copy);
 
+    if (!has_unit_id || !has_unit_model || !has_car_id ||
+        !has_chk_date || !has_status || !has_mechanic || !has_driver) {
+        fprintf(output, "incorrect:'%.20s'\n", line);
+        return;
+    }
+
     fprintf(output, "insert:0\n");
 }
+
 
 
 void read_input(FILE* input, FILE* output) {
@@ -38,18 +138,7 @@ void read_input(FILE* input, FILE* output) {
         
         if (strncmp(line, "insert", 6) == 0 && line[6] == ' ')
         {
-            char* args = line + 6;
-            
-            while (*args == ' ') {
-                args++;
-            }
-
-            if (*args == '\0') {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                return;
-            } else {
-                insert_db(args, output);
-            }
+            insert_db(line, output);
             
         }
         else if (strncmp(line, "select", 6) == 0 && line[6] == ' ')
