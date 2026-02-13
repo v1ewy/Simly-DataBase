@@ -19,7 +19,7 @@ typedef struct {
 
 typedef struct Node {
     int unit_id;
-    char unit_model[256];
+    char unit_model[16];
     char carnum[16];
     Date chk_date;
     Status status;
@@ -54,8 +54,7 @@ char* trim(char* s)
     return s;
 }
 
-int parse_int(const char* s, int* out)
-{
+int parse_int(const char* s, int* out) {
     char* end;
     long val = strtol(s, &end, 10);
 
@@ -66,8 +65,31 @@ int parse_int(const char* s, int* out)
     return 1;
 }
 
+int parse_quoted_string(char* value, char* dest, size_t max)
+{
+    size_t len = strlen(value);
+
+    if (len < 2)
+        return 0;
+
+    if (value[0] != '"' || value[len - 1] != '"')
+        return 0;
+
+    value[len - 1] = '\0';
+    value++;
+
+    if (strlen(value) >= max)
+        return 0;
+
+    strcpy(dest, value);
+
+    return 1;
+}
+
+
 
 void insert_db(char* line, FILE* output, Node** head, int* size_db) {
+    Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
 
     if (*args == '\0') {
@@ -114,22 +136,27 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     for (int i = 0; i < FIELD_COUNT; i++)
         if (!seen[i]) goto error;
 
-    free(copy);
     
+    if (!parse_int(seen[0], &new_node->unit_id)) {
+        goto error;
+    }
+    if (!parse_quoted_string(seen[1], new_node->unit_model, sizeof(&new_node->unit_model))) {
+        goto error;
+    }
     
+    new_node->next = *head;
+    *head = new_node;
 
-    fprintf(output, "insert:%d\n", ++(*size_db));
+    fprintf(output, "insert:%d, %d, %s\n", new_node->unit_id, ++(*size_db), new_node->unit_model);
+    
+    free(copy);
     return;
 
 error:
     fprintf(output, "incorrect:'%.20s'\n", line);
-    if (copy) {
-        free(copy);
-    }
+    free(copy);
+    free(new_node);
 }
-
-
-
 
 void read_input(FILE* input, FILE* output, Node** head, int* db_size) {
     char* line = NULL;
