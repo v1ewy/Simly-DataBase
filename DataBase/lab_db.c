@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
+#define FIELD_COUNT 7
 
 typedef enum {
     well,
@@ -29,14 +29,46 @@ typedef struct Node {
 } Node;
 
 
+const char* field_names[FIELD_COUNT] = {
+    "unit_id",
+    "unit_model",
+    "car_id",
+    "chk_date",
+    "status",
+    "mechanic",
+    "driver"
+};
+
+char* trim(char* s)
+{
+    while (*s == ' ')
+        s++;
+
+    char* end = s + strlen(s) - 1;
+
+    while (end > s && *end == ' ') {
+        *end = '\0';
+        end--;
+    }
+
+    return s;
+}
+
+int parse_int(const char* s, int* out)
+{
+    char* end;
+    long val = strtol(s, &end, 10);
+
+    if (*s == '\0' || *end != '\0')
+        return 0;
+
+    *out = (int)val;
+    return 1;
+}
 
 
 void insert_db(char* line, FILE* output, Node** head, int* size_db) {
-    Node* temp = NULL;
     char* args = line + 6;
-
-    while (*args == ' ')
-        args++;
 
     if (*args == '\0') {
         fprintf(output, "incorrect:'%.20s'\n", line);
@@ -44,115 +76,58 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     }
 
     char* copy = strdup(args);
-    if (!copy) return;
+    if (!copy) goto error;
 
-    int has_unit_id = 0;
-    int has_unit_model = 0;
-    int has_car_id = 0;
-    int has_chk_date = 0;
-    int has_status = 0;
-    int has_mechanic = 0;
-    int has_driver = 0;
+    char* seen[FIELD_COUNT] = {0};
 
     char* token = strtok(copy, ",");
 
-    while (token != NULL) {
-        while (*token == ' ')
-            token++;
+    while (token) {
 
         char* eq = strchr(token, '=');
-        if (eq == NULL) {
-            fprintf(output, "incorrect:'%.20s'\n", line);
-            free(copy);
-            return;
-        }
+        if (!eq) goto error;
 
         *eq = '\0';
-        char* field = token;
-        char* value = eq + 1;
+        char* field = trim(token);
+        char* value = trim(eq + 1);
 
-        if (*field == '\0' || *value == '\0') {
-            fprintf(output, "incorrect:'%.20s'\n", line);
-            free(copy);
-            return;
+        if (*field == '\0' || *value == '\0')
+            goto error;
+
+        int found = 0;
+
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            if (strcmp(field, field_names[i]) == 0) {
+                if (seen[i]) goto error;
+                seen[i] = value;
+                found = 1;
+                break;
+            }
         }
 
-        if (strcmp(field, "unit_id") == 0) {
-            if (has_unit_id) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_unit_id = 1;
-
-        }
-        else if (strcmp(field, "unit_model") == 0) {
-            if (has_unit_model) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_unit_model = 1;
-        }
-        else if (strcmp(field, "car_id") == 0) {
-            if (has_car_id) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_car_id = 1;
-        }
-        else if (strcmp(field, "chk_date") == 0) {
-            if (has_chk_date) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_chk_date = 1;
-        }
-        else if (strcmp(field, "status") == 0) {
-            if (has_status) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_status = 1;
-        }
-        else if (strcmp(field, "mechanic") == 0) {
-            if (has_mechanic) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_mechanic = 1;
-        }
-        else if (strcmp(field, "driver") == 0) {
-            if (has_driver) {
-                fprintf(output, "incorrect:'%.20s'\n", line);
-                free(copy);
-                return;
-            }
-            has_driver = 1;
-        }
-        else {
-            fprintf(output, "incorrect:'%.20s'\n", line);
-            free(copy);
-            return;
-        }
+        if (!found)
+            goto error;
 
         token = strtok(NULL, ",");
     }
 
+    for (int i = 0; i < FIELD_COUNT; i++)
+        if (!seen[i]) goto error;
+
     free(copy);
+    
+    
 
-    if (!has_unit_id || !has_unit_model || !has_car_id ||
-        !has_chk_date || !has_status || !has_mechanic || !has_driver) {
-        fprintf(output, "incorrect:'%.20s'\n", line);
-        return;
+    fprintf(output, "insert:%d\n", ++(*size_db));
+    return;
+
+error:
+    fprintf(output, "incorrect:'%.20s'\n", line);
+    if (copy) {
+        free(copy);
     }
-
-    fprintf(output, "insert:0\n");
 }
+
 
 
 
