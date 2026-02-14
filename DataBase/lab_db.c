@@ -33,6 +33,12 @@ typedef struct Node {
     struct Node* next;
 } Node;
 
+typedef struct Queue {
+    struct Node* head;
+    struct Node* tail;
+    int size;
+} Queue;
+
 // array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
     "unit_id",
@@ -43,6 +49,13 @@ const char* field_names[FIELD_COUNT] = {
     "mechanic",
     "driver"
 };
+
+
+void init_queue (struct Queue* queue) {
+    queue->head = NULL;
+    queue->tail = NULL;
+    queue->size = 0;
+}
 
 // function of removing spaces
 char* trim(char* s)
@@ -233,7 +246,7 @@ const char* status_to_string(Status s) {
 }
 
 // function insert
-void insert_db(char* line, FILE* output, Node** head, int* size_db) {
+void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
 
@@ -303,14 +316,17 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     if (!parse_double_quoted_string(seen[6], new_node->driver, sizeof(new_node->driver))) {
         goto error;
     }
-    
-    
-    new_node->next = *head;
-    *head = new_node;
+    new_node->next = NULL;
 
-    fprintf(output, "insert:%d, %d, %s, %s, '%02d.%02d.%d',%s, %s, %s\n", ++(*size_db), (*head)->unit_id, new_node->unit_model, new_node->carnum,
-            (*head)->chk_date.day, (*head)->chk_date.month, (*head)->chk_date.year, status_to_string(new_node->status)
-            , new_node->mechanic, new_node->driver);
+    if (queue->head == NULL) {
+        queue->head = new_node;
+        queue->tail = new_node;
+    } else {
+        (*queue->tail).next = new_node;
+        queue->tail = new_node;
+    }
+
+    fprintf(output, "insert:%d\n", ++queue->size);
     
     free(copy);
     return;
@@ -321,7 +337,120 @@ error:
     free(new_node);
 }
 
-void read_input(FILE* input, FILE* output, Node** head, int* db_size) {
+
+int parse_field_list(char* str, int fields[], int* count)
+{
+    *count = 0;
+
+    char* token = strtok(str, ",");
+
+    while (token) {
+
+        token = trim(token);
+
+        int found = 0;
+
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            if (strcmp(token, field_names[i]) == 0) {
+                fields[(*count)++] = i;
+                found = 1;
+                break;
+            }
+        }
+
+        if (!found)
+            return 0;
+
+        token = strtok(NULL, ",");
+    }
+
+    return *count > 0;
+}
+
+
+void print_field(FILE* out, Node* n, int field)
+{
+    switch (field) {
+
+    case 0:
+        fprintf(out, "unit_id=%d", n->unit_id);
+        break;
+
+    case 1:
+        fprintf(out, "unit_model=\"%s\"", n->unit_model);
+        break;
+
+    case 2:
+        fprintf(out, "car_id='%s'", n->carnum);
+        break;
+
+    case 3:
+        fprintf(out, "chk_date='%02d.%02d.%d'",
+                n->chk_date.day, n->chk_date.month, n->chk_date.year);
+        break;
+
+    case 4:
+        fprintf(out, "status=%s",
+                status_to_string(n->status));
+        break;
+
+    case 5:
+        fprintf(out, "mechanic=\"%s\"", n->mechanic);
+        break;
+
+    case 6:
+        fprintf(out, "driver=\"%s\"", n->driver);
+        break;
+    }
+}
+
+
+void select_db(char* line, FILE* output, Queue* queue) {
+    char* args = line + 6;
+
+    if (*args == '\0') {
+        fprintf(output, "incorrect:'%.20s'\n", line);
+        return;
+    }
+    args = trim(args);
+    
+    char* cond = strchr(args, ' ');
+    
+    if (cond)
+        *cond++ = '\0';
+    
+    int fields[FIELD_COUNT];
+    int field_count;
+    
+    if (!parse_field_list(args, fields, &field_count)) {
+         fprintf(output, "incorrect:'%.20s'\n", args);
+         return;
+    }
+    
+    int found = 0;
+    
+    for (Node* cur = queue->head; cur; cur = cur->next) {
+
+            // позже здесь будет проверка условий
+
+            found++;
+
+            for (int i = 0; i < field_count; i++) {
+
+                print_field(output, cur, fields[i]);
+
+                if (i + 1 < field_count)
+                    fprintf(output, " ");
+            }
+
+            fprintf(output, "\n");
+        }
+
+        fprintf(output, "select:%d\n", found);
+}
+
+
+void read_input(FILE* input, FILE* output, Queue* queue) {
     char* line = NULL;
     size_t cap = 0;
     
@@ -333,12 +462,12 @@ void read_input(FILE* input, FILE* output, Node** head, int* db_size) {
         
         if (strncmp(line, "insert", 6) == 0 && line[6] == ' ')
         {
-            insert_db(line, output, head, db_size);
+            insert_db(line, output, queue);
             
         }
         else if (strncmp(line, "select", 6) == 0 && line[6] == ' ')
         {
-            fprintf(output, "select:0\n");
+            select_db(line, output, queue);
         }
         else if (strncmp(line, "delete", 6) == 0 && line[6] == ' ')
         {
@@ -361,16 +490,21 @@ void read_input(FILE* input, FILE* output, Node** head, int* db_size) {
     free(line);
 }
 
-void free_db(Node* head) {
-    Node* tmp;
-
-    while (head) {
-        tmp = head;
-        head = head->next;
-        free(tmp);
+void free_db(struct Queue* queue) {
+    int cnt_task = 0;
+    struct Node* current = queue->head;
+    struct Node* next;
+    while (current != NULL) {
+        next = current->next;
+        free(current);
+        current = next;
+        cnt_task++;
     }
     
-    head = NULL;
+    queue->head = NULL;
+    queue->tail = NULL;
+    queue->size = 0;
+    
 }
 
 int main(void) {
@@ -380,12 +514,12 @@ int main(void) {
         return 1;
     }
     
-    Node* head = NULL;
-    int db_size = 0;
+    struct Queue queue;
+    init_queue(&queue);
     
-    read_input(input, output, &head, &db_size);
+    read_input(input, output, &queue);
     
-    free_db(head);
+    free_db(&queue);
     
     fclose(input);
     fclose(output);
