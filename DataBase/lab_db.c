@@ -73,7 +73,7 @@ int parse_int(const char* s, int* out) {
 }
 
 // function of parsing string with double quotes
-int parse_quoted_string(char* value, char* dest, size_t max)
+int parse_double_quoted_string(char* value, char* dest, size_t max)
 {
     size_t len = strlen(value);
 
@@ -191,6 +191,47 @@ int parse_date(char* value, Date* out) {
     return 1;
 }
 
+// function of parsing status
+int parse_status(char* value, Status* out) {
+    size_t len = strlen(value);
+
+    if (len < 2)
+        return 0;
+
+    if (value[0] != '\'' || value[len - 1] != '\'')
+        return 0;
+
+    value[len - 1] = '\0';
+    value++;
+
+    if (strcmp(value, "well") == 0)
+        *out = well;
+    else if (strcmp(value, "wearlow") == 0)
+        *out = wearlow;
+    else if (strcmp(value, "wearhigh") == 0)
+        *out = wearhigh;
+    else if (strcmp(value, "broken") == 0)
+        *out = broken;
+    else if (strcmp(value, "notcheck") == 0)
+        *out = notcheck;
+    else
+        return 0;
+
+    return 1;
+}
+
+
+const char* status_to_string(Status s) {
+    switch (s) {
+        case well: return "'well'";
+        case wearlow: return "'wearlow'";
+        case wearhigh: return "'wearhigh'";
+        case broken: return "'broken'";
+        case notcheck: return "'notcheck'";
+    }
+    return "'unknown'";
+}
+
 // function insert
 void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     Node* new_node = malloc(sizeof(Node));
@@ -244,7 +285,7 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     if (!parse_int(seen[0], &new_node->unit_id)) {
         goto error;
     }
-    if (!parse_quoted_string(seen[1], new_node->unit_model, sizeof(new_node->unit_model))) {
+    if (!parse_double_quoted_string(seen[1], new_node->unit_model, sizeof(new_node->unit_model))) {
         goto error;
     }
     if (!parse_carnum(seen[2], new_node->carnum, sizeof(new_node->carnum))) {
@@ -253,13 +294,23 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     if (!parse_date(seen[3], &new_node->chk_date)) {
         goto error;
     }
+    if (!parse_status(seen[4], &new_node->status)) {
+        goto error;
+    }
+    if (!parse_double_quoted_string(seen[5], new_node->mechanic, sizeof(new_node->mechanic))) {
+        goto error;
+    }
+    if (!parse_double_quoted_string(seen[6], new_node->driver, sizeof(new_node->driver))) {
+        goto error;
+    }
     
     
     new_node->next = *head;
     *head = new_node;
 
-    fprintf(output, "insert:%d, %d, %s, %s, '%02d.%02d.%d'\n", ++(*size_db), (*head)->unit_id, new_node->unit_model, new_node->carnum,
-            (*head)->chk_date.day, (*head)->chk_date.month, (*head)->chk_date.year);
+    fprintf(output, "insert:%d, %d, %s, %s, '%02d.%02d.%d',%s, %s, %s\n", ++(*size_db), (*head)->unit_id, new_node->unit_model, new_node->carnum,
+            (*head)->chk_date.day, (*head)->chk_date.month, (*head)->chk_date.year, status_to_string(new_node->status)
+            , new_node->mechanic, new_node->driver);
     
     free(copy);
     return;
