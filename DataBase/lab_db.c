@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+
 #define FIELD_COUNT 7
 
+//enum for a status
 typedef enum {
     well,
     wearlow,
@@ -11,12 +14,14 @@ typedef enum {
     notcheck
 } Status;
 
+// structure for a date
 typedef struct {
     int day;
     int month;
     int year;
 } Date;
 
+// the basic structure of the database
 typedef struct Node {
     int unit_id;
     char unit_model[16];
@@ -28,7 +33,7 @@ typedef struct Node {
     struct Node* next;
 } Node;
 
-
+// array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
     "unit_id",
     "unit_model",
@@ -39,6 +44,7 @@ const char* field_names[FIELD_COUNT] = {
     "driver"
 };
 
+// function of removing spaces
 char* trim(char* s)
 {
     while (*s == ' ')
@@ -54,6 +60,7 @@ char* trim(char* s)
     return s;
 }
 
+// function of parsing int
 int parse_int(const char* s, int* out) {
     char* end;
     long val = strtol(s, &end, 10);
@@ -65,6 +72,7 @@ int parse_int(const char* s, int* out) {
     return 1;
 }
 
+// function of parsing string with double quotes
 int parse_quoted_string(char* value, char* dest, size_t max)
 {
     size_t len = strlen(value);
@@ -86,8 +94,104 @@ int parse_quoted_string(char* value, char* dest, size_t max)
     return 1;
 }
 
+// letter verification function for carnum
+int valid_letter(char c) {
+    const char* allowed = "ABCEHKMOPTXY";
+    return strchr(allowed, c) != NULL;
+}
 
+// function of parsing carnum
+int parse_carnum(char* value, char* dest, size_t max) {
+    size_t len = strlen(value);
 
+    if (len < 2 || value[0] != '\'' || value[len - 1] != '\'')
+        return 0;
+
+    value[len - 1] = '\0';
+    value++;
+
+    len = strlen(value);
+
+    if (len != 8 && len != 9)
+        return 0;
+
+    if (!valid_letter(value[0]))
+        return 0;
+
+    for (int i = 1; i <= 3; i++)
+        if (!isdigit(value[i]))
+            return 0;
+
+    if (!valid_letter(value[4]) || !valid_letter(value[5]))
+        return 0;
+
+    for (int i = 6; i < len; i++)
+        if (!isdigit(value[i]))
+            return 0;
+
+    if (len >= max)
+        return 0;
+
+    strcpy(dest, value);
+
+    return 1;
+}
+
+// cheaking leap year
+int is_leap(int y) {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+// checking day
+int days_in_month(int m, int y) {
+    static int d[] = {
+        31,28,31,30,31,30,
+        31,31,30,31,30,31
+    };
+
+    if (m == 2 && is_leap(y))
+        return 29;
+
+    return d[m - 1];
+}
+
+// function of parsing date
+int parse_date(char* value, Date* out) {
+    size_t len = strlen(value);
+
+    if (len < 8)
+        return 0;
+
+    if (value[0] != '\'' || value[len - 1] != '\'')
+        return 0;
+
+    value[len - 1] = '\0';
+    value++;
+
+    int d, m, y;
+
+    if (sscanf(value, "%d.%d.%d", &d, &m, &y) != 3)
+        return 0;
+
+    if (y < 1000 || y > 2026)
+        return 0;
+
+    if (m < 1 || m > 12)
+        return 0;
+
+    int maxd = days_in_month(m, y);
+
+    if (d < 1 || d > maxd)
+        return 0;
+
+    out->day = d;
+    out->month = m;
+    out->year = y;
+
+    return 1;
+}
+
+// function insert
 void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
@@ -140,14 +244,22 @@ void insert_db(char* line, FILE* output, Node** head, int* size_db) {
     if (!parse_int(seen[0], &new_node->unit_id)) {
         goto error;
     }
-    if (!parse_quoted_string(seen[1], new_node->unit_model, sizeof(&new_node->unit_model))) {
+    if (!parse_quoted_string(seen[1], new_node->unit_model, sizeof(new_node->unit_model))) {
         goto error;
     }
+    if (!parse_carnum(seen[2], new_node->carnum, sizeof(new_node->carnum))) {
+        goto error;
+    }
+    if (!parse_date(seen[3], &new_node->chk_date)) {
+        goto error;
+    }
+    
     
     new_node->next = *head;
     *head = new_node;
 
-    fprintf(output, "insert:%d, %d, %s\n", new_node->unit_id, ++(*size_db), new_node->unit_model);
+    fprintf(output, "insert:%d, %d, %s, %s, '%02d.%02d.%d'\n", ++(*size_db), (*head)->unit_id, new_node->unit_model, new_node->carnum,
+            (*head)->chk_date.day, (*head)->chk_date.month, (*head)->chk_date.year);
     
     free(copy);
     return;
