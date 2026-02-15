@@ -618,7 +618,7 @@ int cmp_str(const char* a, const char* b, Operator op) {
     }
 }
 
-int parse_digits(const char* s, int start, int len) {
+int parse_carnum_digits(const char* s, int start, int len) {
     int v = 0;
 
     for (int i = 0; i < len; i++)
@@ -627,7 +627,7 @@ int parse_digits(const char* s, int start, int len) {
     return v;
 }
 
-void extract_letters(const char* s, char out[4]) {
+void parse_carnum_letters(const char* s, char out[4]) {
     out[0] = s[0];
     out[1] = s[4];
     out[2] = s[5];
@@ -635,8 +635,8 @@ void extract_letters(const char* s, char out[4]) {
 }
 
 int cmp_carnum(const char* a, const char* b, Operator op) {
-    int numA = parse_digits(a, 1, 3);
-    int numB = parse_digits(b, 1, 3);
+    int numA = parse_carnum_digits(a, 1, 3);
+    int numB = parse_carnum_digits(b, 1, 3);
 
     if (numA != numB)
         return cmp_int(numA, numB, op);
@@ -644,8 +644,8 @@ int cmp_carnum(const char* a, const char* b, Operator op) {
     char lettersA[4];
     char lettersB[4];
 
-    extract_letters(a, lettersA);
-    extract_letters(b, lettersB);
+    parse_carnum_letters(a, lettersA);
+    parse_carnum_letters(b, lettersB);
 
     int cmp = strcmp(lettersA, lettersB);
 
@@ -655,8 +655,8 @@ int cmp_carnum(const char* a, const char* b, Operator op) {
     int lenA = (int)strlen(a);
     int lenB = (int)strlen(b);
 
-    int regA = parse_digits(a, 6, lenA - 6);
-    int regB = parse_digits(b, 6, lenB - 6);
+    int regA = parse_carnum_digits(a, 6, lenA - 6);
+    int regB = parse_carnum_digits(b, 6, lenB - 6);
 
     return cmp_int(regA, regB, op);
 }
@@ -703,7 +703,7 @@ int check_condition(Node* n, Condition* c) {
             return cmp_int(s, c->value.status.list[0], c->op);
         }
         case 5:
-            return cmp_str(n->driver, c->value.str, c->op);
+            return cmp_str(n->mechanic, c->value.str, c->op);
             
         case 6:
             return cmp_str(n->driver, c->value.str, c->op);
@@ -779,6 +779,57 @@ error:
     return;
 }
 
+void delete_db(char* line, FILE* output, Queue* queue) {
+    char* args = line + 6;
+
+    Condition* conds = NULL;
+    int cond_count = 0;
+
+    if (*args == '\0')
+        goto error;
+
+    args = trim(args);
+
+    if (!parse_conditions(args, &conds, &cond_count))
+        goto error;
+
+    Node* cur = queue->head;
+    Node* prev = NULL;
+
+    int deleted = 0;
+
+    while (cur) {
+        Node* next = cur->next;
+
+        if (check_conditions(cur, conds, cond_count)) {
+            if (prev)
+                prev->next = next;
+            else
+                queue->head = next;
+
+            if (queue->tail == cur) queue->tail = prev;
+
+            free(cur);
+            deleted++;
+            
+        } else {
+            prev = cur;
+        }
+
+        cur = next;
+    }
+
+    fprintf(output, "delete:%d\n", deleted);
+
+    free(conds);
+    return;
+
+error:
+    fprintf(output, "incorrect:'%.20s'\n", line);
+    free(conds);
+}
+
+
 
 void read_input(FILE* input, FILE* output, Queue* queue) {
     char* line = NULL;
@@ -801,7 +852,7 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
         }
         else if (strncmp(line, "delete", 6) == 0 && line[6] == ' ')
         {
-            fprintf(output, "delete:0\n");
+            delete_db(line, output, queue);
         }
         else if (strncmp(line, "uniq", 4) == 0 && line[4] == ' ')
         {
