@@ -686,8 +686,8 @@ int cmp_date(Date a, Date b, Operator op) {
     return cmp_int(date_to_int(a), date_to_int(b), op);
 }
 
-int status_in(Status s, Status* list) {
-    for (int i = 0; i < MAX_STATUS; i++)
+int status_in(Status s, Status* list, int count) {
+    for (int i = 0; i < count; i++)
         if (list[i] == s)
             return 1;
 
@@ -721,10 +721,10 @@ int check_condition(Node* n, Condition* c) {
             }
             
             if (c->op == OP_IN)
-                return status_in(s, c->value.status.list);
+                return status_in(s, c->value.status.list, c->value.status.count);
             
             if (c->op == OP_NOT_IN)
-                return !status_in(s, c->value.status.list);
+                return !status_in(s, c->value.status.list, c->value.status.count);
             
             return cmp_int(s, c->value.status.list[0], c->op);
         }
