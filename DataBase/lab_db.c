@@ -58,15 +58,27 @@ typedef struct {
     union {
         int i;
         char str[256];
+        char carnum[256];
         Date date;
         struct {
             Status list[MAX_STATUS];
             int count;
         } status;
-        char carnum[256];
     } value;
 
 } Condition;
+
+typedef struct {
+    int field;
+    union {
+        int i;
+        char str[256];
+        char carnum[256];
+        Date date;
+        Status status;
+    } value;
+} Update;
+
 
 // array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
@@ -512,6 +524,11 @@ int parse_condition_value(Condition* c, char* value) {
                 size_t len = strlen(value);
                 value[len-1] = '\0';
                 value++;
+
+                c->value.status.count = 0;
+                
+                if (*value == '\0')
+                    return 1;
                 
                 char* token = strtok(value, ",");
                 while (token) {
@@ -618,7 +635,7 @@ int cmp_str(const char* a, const char* b, Operator op) {
     }
 }
 
-int parse_carnum_digits(const char* s, int start, int len) {
+int carnum_digits(const char* s, int start, int len) {
     int v = 0;
 
     for (int i = 0; i < len; i++)
@@ -627,7 +644,7 @@ int parse_carnum_digits(const char* s, int start, int len) {
     return v;
 }
 
-void parse_carnum_letters(const char* s, char out[4]) {
+void carnum_letters(const char* s, char out[4]) {
     out[0] = s[0];
     out[1] = s[4];
     out[2] = s[5];
@@ -635,8 +652,8 @@ void parse_carnum_letters(const char* s, char out[4]) {
 }
 
 int cmp_carnum(const char* a, const char* b, Operator op) {
-    int numA = parse_carnum_digits(a, 1, 3);
-    int numB = parse_carnum_digits(b, 1, 3);
+    int numA = carnum_digits(a, 1, 3);
+    int numB = carnum_digits(b, 1, 3);
 
     if (numA != numB)
         return cmp_int(numA, numB, op);
@@ -644,8 +661,8 @@ int cmp_carnum(const char* a, const char* b, Operator op) {
     char lettersA[4];
     char lettersB[4];
 
-    parse_carnum_letters(a, lettersA);
-    parse_carnum_letters(b, lettersB);
+    carnum_letters(a, lettersA);
+    carnum_letters(b, lettersB);
 
     int cmp = strcmp(lettersA, lettersB);
 
@@ -655,8 +672,8 @@ int cmp_carnum(const char* a, const char* b, Operator op) {
     int lenA = (int)strlen(a);
     int lenB = (int)strlen(b);
 
-    int regA = parse_carnum_digits(a, 6, lenA - 6);
-    int regB = parse_carnum_digits(b, 6, lenB - 6);
+    int regA = carnum_digits(a, 6, lenA - 6);
+    int regB = carnum_digits(b, 6, lenB - 6);
 
     return cmp_int(regA, regB, op);
 }
@@ -693,6 +710,15 @@ int check_condition(Node* n, Condition* c) {
 
         case 4: {
             Status s = n->status;
+            
+            if (c->value.status.count == 0) {
+
+                if (c->op == OP_IN)
+                    return 0;
+
+                if (c->op == OP_NOT_IN)
+                    return 1;
+            }
             
             if (c->op == OP_IN)
                 return status_in(s, c->value.status.list);
@@ -732,9 +758,8 @@ void select_db(char* line, FILE* output, Queue* queue) {
     Condition* conds = NULL;
     int cond_count = 0;
 
-    if (*args == '\0') {
-        goto error;
-    }
+    if (*args == '\0') goto error;
+    
     args = trim(args);
     
     char* cond = strchr(args, ' ');
@@ -785,8 +810,7 @@ void delete_db(char* line, FILE* output, Queue* queue) {
     Condition* conds = NULL;
     int cond_count = 0;
 
-    if (*args == '\0')
-        goto error;
+    if (*args == '\0') goto error;
 
     args = trim(args);
 
@@ -829,6 +853,138 @@ error:
     free(conds);
 }
 
+int parse_updates(char* str, Update** upds, int* count) {
+    *upds = NULL;
+    *count = 0;
+
+    char* token;
+    char* saveptr;
+    token = strtok_r(str, ",", &saveptr);
+
+    while (token) {
+        token = trim(token);
+
+        char* eq = strchr(token, '=');
+        if (!eq) return 0;
+
+        *eq = '\0';
+
+        char* field = trim(token);
+        char* value = trim(eq + 1);
+
+        int id = -1;
+        for (int i = 0; i < FIELD_COUNT; i++)
+            if (!strcmp(field, field_names[i])) {
+                id = i;
+                break;
+            }
+
+        if (id == -1) return 0;
+
+        Update* tmp = realloc(*upds, (*count + 1) * sizeof(Update));
+        if (!tmp) return 0;
+
+        *upds = tmp;
+
+        Update* u = &(*upds)[*count];
+        u->field = id;
+
+        Condition fake;
+        fake.field = id;
+
+        if (!parse_condition_value(&fake, value))
+            return 0;
+
+        memcpy(&u->value, &fake.value, sizeof(u->value));
+
+        (*count)++;
+
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    return *count > 0;
+}
+
+void apply_update(Node* n, Update* upds, int count) {
+    for (int i = 0; i < count; i++) {
+        switch (upds[i].field) {
+
+        case 0:
+            n->unit_id = upds[i].value.i;
+            break;
+                
+        case 1:
+            strcpy(n->unit_model, upds[i].value.str);
+            break;
+        
+        case 2:
+            strcpy(n->carnum, upds[i].value.carnum);
+            break;
+                
+        case 3:
+            n->chk_date = upds[i].value.date;
+            break;
+
+        case 4:
+            n->status = upds[i].value.status;
+            break;
+
+        case 5:
+            strcpy(n->mechanic, upds[i].value.str);
+            break;
+                
+        case 6:
+            strcpy(n->driver, upds[i].value.str);
+            break;
+        }
+    }
+}
+
+void update_db(char* line, FILE* out, Queue* q) {
+    char* args = trim(line + 6);
+    
+    Update* upds = NULL;
+    int upd_count = 0;
+
+    Condition* conds = NULL;
+    int cond_count = 0;
+
+    if (*args == '\0') goto error;
+
+    char* cond = strchr(args, ' ');
+
+    if (cond) {
+        *cond++ = '\0';
+
+        if (!parse_conditions(cond, &conds, &cond_count))
+            goto error;
+    }
+
+    if (!parse_updates(args, &upds, &upd_count))
+        goto error;
+
+    int updated = 0;
+
+    for (Node* cur = q->head; cur; cur = cur->next) {
+
+        if (cond_count && !check_conditions(cur, conds, cond_count))
+            continue;
+
+        apply_update(cur, upds, upd_count);
+        updated++;
+    }
+
+    fprintf(out, "update:%d\n", updated);
+
+    free(upds);
+    free(conds);
+    return;
+
+error:
+    fprintf(out, "incorrect:'%.20s'\n", line);
+    free(upds);
+    free(conds);
+}
 
 
 void read_input(FILE* input, FILE* output, Queue* queue) {
@@ -841,25 +997,22 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
             continue;
         }
         
-        if (strncmp(line, "insert", 6) == 0 && line[6] == ' ')
-        {
+        if (strncmp(line, "insert", 6) == 0 && line[6] == ' ') {
             insert_db(line, output, queue);
             
-        }
-        else if (strncmp(line, "select", 6) == 0 && line[6] == ' ')
-        {
+        } else if (strncmp(line, "select", 6) == 0 && line[6] == ' ') {
             select_db(line, output, queue);
-        }
-        else if (strncmp(line, "delete", 6) == 0 && line[6] == ' ')
-        {
+            
+        } else if (strncmp(line, "delete", 6) == 0 && line[6] == ' ') {
             delete_db(line, output, queue);
-        }
-        else if (strncmp(line, "uniq", 4) == 0 && line[4] == ' ')
-        {
+            
+        } else if (strncmp(line, "update", 6) == 0 && line[6] == ' ') {
+            update_db(line, output, queue);
+            
+        } else if (strncmp(line, "uniq", 4) == 0 && line[4] == ' ') {
             fprintf(output, "uniq:0\n");
-        }
-        else if (strncmp(line, "sort", 4) == 0 && line[4] == ' ')
-        {
+            
+        } else if (strncmp(line, "sort", 4) == 0 && line[4] == ' ') {
             fprintf(output, "sort:0\n");
             
         } else {
