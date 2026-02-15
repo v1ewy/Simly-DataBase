@@ -39,6 +39,33 @@ typedef struct Queue {
     int size;
 } Queue;
 
+typedef enum {
+    OP_EQ,
+    OP_NE,
+    OP_LT,
+    OP_LE,
+    OP_GT,
+    OP_GE,
+    OP_IN,
+    OP_NOT_IN
+} Operator;
+
+typedef struct {
+    int field;
+    Operator op;
+
+    union {
+        int i;
+        char str[256];
+        Date date;
+        Status status[8];
+        char carnum[256];
+    } value;
+
+} Condition;
+
+
+
 // array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
     "unit_id",
@@ -249,13 +276,9 @@ const char* status_to_string(Status s) {
 void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
-
-    if (*args == '\0') {
-        fprintf(output, "incorrect:'%.20s'\n", line);
-        return;
-    }
-
     char* copy = strdup(args);
+
+    if (*args == '\0') goto error;
     if (!copy) goto error;
 
     char* seen[FIELD_COUNT] = {0};
@@ -338,8 +361,8 @@ error:
 }
 
 
-int parse_field_list(char* str, int fields[], int* count)
-{
+int parse_field_list(char* str, int** fields, int* count) {
+    *fields = NULL;
     *count = 0;
 
     char* token = strtok(str, ",");
@@ -348,18 +371,28 @@ int parse_field_list(char* str, int fields[], int* count)
 
         token = trim(token);
 
-        int found = 0;
+        int field = -1;
 
         for (int i = 0; i < FIELD_COUNT; i++) {
             if (strcmp(token, field_names[i]) == 0) {
-                fields[(*count)++] = i;
-                found = 1;
+                field = i;
                 break;
             }
         }
 
-        if (!found)
+        if (field == -1)
             return 0;
+
+        int* tmp = realloc(*fields,
+                           (*count + 1) * sizeof(int));
+
+        if (!tmp)
+            return 0;
+
+        *fields = tmp;
+        (*fields)[*count] = field;
+
+        (*count)++;
 
         token = strtok(NULL, ",");
     }
@@ -368,8 +401,8 @@ int parse_field_list(char* str, int fields[], int* count)
 }
 
 
-void print_field(FILE* out, Node* n, int field)
-{
+
+void print_field(FILE* out, Node* n, int field) {
     switch (field) {
 
     case 0:
@@ -404,49 +437,210 @@ void print_field(FILE* out, Node* n, int field)
     }
 }
 
+Operator parse_operator(char** p) {
+    char* s = *p;
+
+    if (strncmp(s, "/not_in/", 8) == 0) {
+        **p = '\0';
+        *p += 8;
+        return OP_NOT_IN;
+    }
+
+    if (strncmp(s, "/in/", 4) == 0) {
+        **p = '\0';
+        *p += 4;
+        return OP_IN;
+    }
+
+    if (strncmp(s, ">=", 2) == 0) {
+        **p = '\0';
+        *p += 2;
+        return OP_GE;
+    }
+
+    if (strncmp(s, "<=", 2) == 0) {
+        **p = '\0';
+        *p += 2;
+        return OP_LE;
+    }
+
+    if (strncmp(s, "==", 2) == 0) {
+        **p = '\0';
+        *p += 2;
+        return OP_EQ;
+    }
+
+    if (strncmp(s, "!=", 2) == 0) {
+        **p = '\0';
+        *p += 2;
+        return OP_NE;
+    }
+
+    if (*s == '>') {
+        **p = '\0';
+        (*p)++;
+        return OP_GT;
+    }
+
+    if (*s == '<') {
+        **p = '\0';
+        (*p)++;
+        return OP_LT;
+    }
+
+    return -1;
+}
+
+int parse_condition_value(Condition* c, char* value) {
+    switch (c->field)
+    {
+        case 0:
+            return parse_int(value, &c->value.i);
+
+        case 1:
+            return parse_double_quoted_string(value, c->value.str, sizeof(c->value.str));
+            
+        case 2:
+            return parse_carnum(value, c->value.carnum, sizeof(c->value.carnum));
+
+        case 3:
+            return parse_date(value, &c->value.date);
+
+        case 4:
+            if (value[0] == '[') {
+                size_t len = strlen(value);
+                value[len-1] = '\0';
+                value++;
+                
+                int count = 0;
+                char* token = strtok(value, ",");
+                while (token) {
+                    if (!parse_status(token, &c->value.status[count])) {
+                        return 0;
+                    }
+                    count++;
+                    token = strtok(NULL, ",");
+                }
+                return 1;
+            } else {
+                return parse_status(value, &c->value.status[0]);
+            }
+        case 5:
+        case 6:
+            return parse_double_quoted_string(value, c->value.str, sizeof(c->value.str));
+    }
+
+    return 0;
+}
+
+
+int parse_conditions(char* cond_str, Condition** conds, int* count) {
+    *conds = NULL;
+    *count = 0;
+
+    char* token = strtok(cond_str, " ");
+
+    while (token) {
+        Condition* tmp = realloc(*conds, (*count + 1) * sizeof(Condition));
+
+        if (!tmp)
+            return 0;
+
+        *conds = tmp;
+
+        Condition* c = &(*conds)[*count];
+
+        char* field = token;
+
+        while (*token && !strchr("=!<>/", *token))
+            token++;
+
+        c->op = parse_operator(&token);
+        if (c->op == -1)
+            return 0;
+
+        field = trim(field);
+
+        c->field = -1;
+
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            if (strcmp(field, field_names[i]) == 0) {
+                c->field = i;
+                break;
+            }
+        }
+
+        if (c->field == -1)
+            return 0;
+
+        char* value = trim(token);
+
+        if (!parse_condition_value(c, value))
+            return 0;
+
+        (*count)++;
+
+        token = strtok(NULL, " ");
+    }
+
+    return 1;
+}
+
+
 
 void select_db(char* line, FILE* output, Queue* queue) {
     char* args = line + 6;
+    
+    int* fields = NULL;
+    int field_count;
+    
+    Condition* conds = NULL;
+    int cond_count = 0;
 
     if (*args == '\0') {
-        fprintf(output, "incorrect:'%.20s'\n", line);
-        return;
+        goto error;
     }
     args = trim(args);
     
     char* cond = strchr(args, ' ');
     
-    if (cond)
+    if (cond) {
         *cond++ = '\0';
-    
-    int fields[FIELD_COUNT];
-    int field_count;
-    
-    if (!parse_field_list(args, fields, &field_count)) {
-         fprintf(output, "incorrect:'%.20s'\n", args);
-         return;
+        if (!parse_conditions(cond, &conds, &cond_count)) goto error;
     }
+    
+    if (!parse_field_list(args, &fields, &field_count)) goto error;
     
     int found = 0;
     
     for (Node* cur = queue->head; cur; cur = cur->next) {
+        //if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
+        
+        found++;
+    }
 
-            // позже здесь будет проверка условий
+    fprintf(output, "select:%d\n", found);
+    
+    for (Node* cur = queue->head; cur; cur = cur->next) {
+        for (int i = 0; i < field_count; i++) {
+            print_field(output, cur, fields[i]);
 
-            found++;
-
-            for (int i = 0; i < field_count; i++) {
-
-                print_field(output, cur, fields[i]);
-
-                if (i + 1 < field_count)
-                    fprintf(output, " ");
-            }
-
-            fprintf(output, "\n");
+            if (i + 1 < field_count)
+                fprintf(output, " ");
         }
 
-        fprintf(output, "select:%d\n", found);
+        fprintf(output, "\n");
+    }
+    
+    free(fields);
+    free(conds);
+    return;
+
+error:
+    fprintf(output, "incorrect:'%.20s'\n", line);
+    free(fields);
+    free(conds);
+    return;
 }
 
 
