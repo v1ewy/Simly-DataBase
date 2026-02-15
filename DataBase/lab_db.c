@@ -4,6 +4,7 @@
 #include <ctype.h>
 
 #define FIELD_COUNT 7
+#define MAX_STATUS 5
 
 //enum for a status
 typedef enum {
@@ -58,13 +59,14 @@ typedef struct {
         int i;
         char str[256];
         Date date;
-        Status status[8];
+        struct {
+            Status list[MAX_STATUS];
+            int count;
+        } status;
         char carnum[256];
     } value;
 
 } Condition;
-
-
 
 // array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
@@ -492,8 +494,7 @@ Operator parse_operator(char** p) {
 }
 
 int parse_condition_value(Condition* c, char* value) {
-    switch (c->field)
-    {
+    switch (c->field) {
         case 0:
             return parse_int(value, &c->value.i);
 
@@ -512,18 +513,21 @@ int parse_condition_value(Condition* c, char* value) {
                 value[len-1] = '\0';
                 value++;
                 
-                int count = 0;
                 char* token = strtok(value, ",");
                 while (token) {
-                    if (!parse_status(token, &c->value.status[count])) {
-                        return 0;
-                    }
-                    count++;
+                    if (c->value.status.count >= MAX_STATUS)
+                         return 0;
+                    
+                    token = trim(token);
+                    if (!parse_status(token, &c->value.status.list[c->value.status.count])) return 0;
+                    c->value.status.count++;
+                    
                     token = strtok(NULL, ",");
                 }
-                return 1;
+                return c->value.status.count > 0;;
             } else {
-                return parse_status(value, &c->value.status[0]);
+                c->value.status.count = 1;
+                return parse_status(value, &c->value.status.list[0]);
             }
         case 5:
         case 6:
@@ -538,7 +542,8 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
     *conds = NULL;
     *count = 0;
 
-    char* token = strtok(cond_str, " ");
+    char* saveptr;
+    char* token = strtok_r(cond_str, " ", &saveptr);
 
     while (token) {
         Condition* tmp = realloc(*conds, (*count + 1) * sizeof(Condition));
@@ -580,12 +585,142 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
 
         (*count)++;
 
-        token = strtok(NULL, " ");
+        token = strtok_r(NULL, " ", &saveptr);
     }
 
     return 1;
 }
 
+int cmp_int(int a, int b, Operator op) {
+    switch (op) {
+        case OP_EQ: return a == b;
+        case OP_NE: return a != b;
+        case OP_LT: return a < b;
+        case OP_LE: return a <= b;
+        case OP_GT: return a > b;
+        case OP_GE: return a >= b;
+        default: return 0;
+    }
+}
+
+
+int cmp_str(const char* a, const char* b, Operator op) {
+    int r = strcmp(a, b);
+
+    switch (op) {
+        case OP_EQ: return r == 0;
+        case OP_NE: return r != 0;
+        case OP_LT: return r < 0;
+        case OP_LE: return r <= 0;
+        case OP_GT: return r > 0;
+        case OP_GE: return r >= 0;
+        default: return 0;
+    }
+}
+
+int parse_digits(const char* s, int start, int len) {
+    int v = 0;
+
+    for (int i = 0; i < len; i++)
+        v = v * 10 + (s[start + i] - '0');
+
+    return v;
+}
+
+void extract_letters(const char* s, char out[4]) {
+    out[0] = s[0];
+    out[1] = s[4];
+    out[2] = s[5];
+    out[3] = '\0';
+}
+
+int cmp_carnum(const char* a, const char* b, Operator op) {
+    int numA = parse_digits(a, 1, 3);
+    int numB = parse_digits(b, 1, 3);
+
+    if (numA != numB)
+        return cmp_int(numA, numB, op);
+
+    char lettersA[4];
+    char lettersB[4];
+
+    extract_letters(a, lettersA);
+    extract_letters(b, lettersB);
+
+    int cmp = strcmp(lettersA, lettersB);
+
+    if (cmp != 0)
+        return cmp_str(lettersA, lettersB, op);
+
+    int lenA = (int)strlen(a);
+    int lenB = (int)strlen(b);
+
+    int regA = parse_digits(a, 6, lenA - 6);
+    int regB = parse_digits(b, 6, lenB - 6);
+
+    return cmp_int(regA, regB, op);
+}
+
+int date_to_int(Date d) {
+    return d.year * 10000 + d.month * 100 + d.day;
+}
+
+int cmp_date(Date a, Date b, Operator op) {
+    return cmp_int(date_to_int(a), date_to_int(b), op);
+}
+
+int status_in(Status s, Status* list) {
+    for (int i = 0; i < MAX_STATUS; i++)
+        if (list[i] == s)
+            return 1;
+
+    return 0;
+}
+
+int check_condition(Node* n, Condition* c) {
+    switch (c->field) {
+        case 0:
+            return cmp_int(n->unit_id, c->value.i, c->op);
+
+        case 1:
+            return cmp_str(n->unit_model, c->value.str, c->op);
+
+        case 2:
+            return cmp_carnum(n->carnum, c->value.carnum, c->op);
+
+        case 3:
+            return cmp_date(n->chk_date, c->value.date, c->op);
+
+        case 4: {
+            Status s = n->status;
+            
+            if (c->op == OP_IN)
+                return status_in(s, c->value.status.list);
+            
+            if (c->op == OP_NOT_IN)
+                return !status_in(s, c->value.status.list);
+            
+            return cmp_int(s, c->value.status.list[0], c->op);
+        }
+        case 5:
+            return cmp_str(n->driver, c->value.str, c->op);
+            
+        case 6:
+            return cmp_str(n->driver, c->value.str, c->op);
+    }
+
+    return 0;
+}
+
+
+
+int check_conditions(Node* n, Condition* conds, int count) {
+    for (int i = 0; i < count; i++)
+        if (!check_condition(n, &conds[i]))
+            return 0;
+
+    return 1;
+}
 
 
 void select_db(char* line, FILE* output, Queue* queue) {
@@ -614,14 +749,15 @@ void select_db(char* line, FILE* output, Queue* queue) {
     int found = 0;
     
     for (Node* cur = queue->head; cur; cur = cur->next) {
-        //if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
-        
+        if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
         found++;
     }
 
     fprintf(output, "select:%d\n", found);
     
     for (Node* cur = queue->head; cur; cur = cur->next) {
+        if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
+        
         for (int i = 0; i < field_count; i++) {
             print_field(output, cur, fields[i]);
 
