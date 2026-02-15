@@ -297,7 +297,8 @@ void insert_db(char* line, FILE* output, Queue* queue) {
 
     char* seen[FIELD_COUNT] = {0};
 
-    char* token = strtok(copy, ",");
+    char* saveptr;
+    char* token = strtok_r(copy, ",", &saveptr);
 
     while (token) {
 
@@ -325,7 +326,7 @@ void insert_db(char* line, FILE* output, Queue* queue) {
         if (!found)
             goto error;
 
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &saveptr);
     }
 
     for (int i = 0; i < FIELD_COUNT; i++)
@@ -379,7 +380,8 @@ int parse_field_list(char* str, int** fields, int* count) {
     *fields = NULL;
     *count = 0;
 
-    char* token = strtok(str, ",");
+    char* saveptr;
+    char* token = strtok_r(str, ",", &saveptr);
 
     while (token) {
 
@@ -397,8 +399,7 @@ int parse_field_list(char* str, int** fields, int* count) {
         if (field == -1)
             return 0;
 
-        int* tmp = realloc(*fields,
-                           (*count + 1) * sizeof(int));
+        int* tmp = realloc(*fields, (*count + 1) * sizeof(int));
 
         if (!tmp)
             return 0;
@@ -408,7 +409,7 @@ int parse_field_list(char* str, int** fields, int* count) {
 
         (*count)++;
 
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &saveptr);
     }
 
     return *count > 0;
@@ -530,7 +531,8 @@ int parse_condition_value(Condition* c, char* value) {
                 if (*value == '\0')
                     return 1;
                 
-                char* token = strtok(value, ",");
+                char* saveptr;
+                char* token = strtok_r(value, ",", &saveptr);
                 while (token) {
                     if (c->value.status.count >= MAX_STATUS)
                          return 0;
@@ -539,7 +541,7 @@ int parse_condition_value(Condition* c, char* value) {
                     if (!parse_status(token, &c->value.status.list[c->value.status.count])) return 0;
                     c->value.status.count++;
                     
-                    token = strtok(NULL, ",");
+                    token = strtok_r(NULL, ",", &saveptr);
                 }
                 return c->value.status.count > 0;;
             } else {
@@ -984,6 +986,123 @@ error:
     fprintf(out, "incorrect:'%.20s'\n", line);
     free(upds);
     free(conds);
+}
+
+void reverse_queue(Queue* q) {
+    Node* prev = NULL;
+    Node* cur = q->head;
+
+    while (cur) {
+        Node* next = cur->next;
+        cur->next = prev;
+        prev = cur;
+        cur = next;
+    }
+
+    q->head = prev;
+}
+
+int nodes_equal(Node* a, Node* b, int* fields, int count) {
+    for (int i = 0; i < count; i++) {
+        switch (fields[i]) {
+
+        case 0:
+            if (a->unit_id != b->unit_id) return 0;
+            break;
+                
+        case 1:
+            if (strcmp(a->unit_model, b->unit_model)) return 0;
+            break;
+                
+        case 2:
+            if (strcmp(a->carnum, b->carnum)) return 0;
+            break;
+            
+        case 3:
+            if (memcmp(&a->chk_date, &b->chk_date, sizeof(Date)))
+                return 0;
+            break;
+
+        case 4:
+            if (a->status != b->status) return 0;
+            break;
+
+        case 5:
+            if (strcmp(a->driver, b->driver)) return 0;
+            break;
+        case 6:
+            if (strcmp(a->mechanic, b->mechanic)) return 0;
+            break;
+        }
+    }
+
+    return 1;
+}
+
+
+void uniq_db(char* args, Queue* q, FILE* out) {
+    args = trim(args + 4);
+    reverse_queue(q);
+    
+    int* fields = NULL;
+    int field_count;
+
+    Node** seen = NULL;
+    int seen_count = 0;
+
+    Node* prev = NULL;
+    Node* cur = q->head;
+
+    int removed = 0;
+    
+    if (!parse_field_list(args, &fields, &field_count)) goto error;
+
+    while (cur) {
+
+        int duplicate = 0;
+
+        for (int i = 0; i < seen_count; i++) {
+            if (nodes_equal(cur, seen[i], fields, field_count)) {
+                duplicate = 1;
+                break;
+            }
+        }
+
+        if (duplicate) {
+
+            Node* del = cur;
+
+            if (prev)
+                prev->next = cur->next;
+            else
+                q->head = cur->next;
+
+            cur = cur->next;
+
+            free(del);
+            removed++;
+            continue;
+        }
+
+        Node** tmp = realloc(seen, (seen_count + 1) * sizeof(Node*));
+
+        if (!tmp) break;
+
+        seen = tmp;
+        seen[seen_count++] = cur;
+
+        prev = cur;
+        cur = cur->next;
+    }
+
+    reverse_queue(q);
+
+    free(seen);
+
+    fprintf(out, "uniq:%d\n", removed);
+error:
+    fprintf(out, "incorrect:'%.20s'\n", args);
+    free(seen);
 }
 
 
