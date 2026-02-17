@@ -79,6 +79,14 @@ typedef struct {
     } value;
 } Update;
 
+typedef struct {
+    int field;
+    enum {
+        ORDER_ASC,
+        ORDER_DESC
+    } order;
+} SortKey;
+
 
 // array with the names of the arguments
 const char* field_names[FIELD_COUNT] = {
@@ -1132,6 +1140,177 @@ error:
 }
 
 
+int parse_sort_keys(char* str, SortKey** keys, int* count)
+{
+    *keys = NULL;
+    *count = 0;
+
+    char* token;
+
+    while ((token = next_token(&str, ','))) {
+
+        char* eq = strchr(token, '=');
+        if (!eq) return 0;
+
+        *eq = '\0';
+
+        char* field = trim(token);
+        char* ord   = trim(eq + 1);
+
+        int f = -1;
+
+        for (int i = 0; i < FIELD_COUNT; i++) {
+            if (strcmp(field, field_names[i]) == 0) {
+                f = i;
+                break;
+            }
+        }
+
+        if (f == -1)
+            return 0;
+
+        if (f == 4)
+            return 0;
+
+        for (int i = 0; i < *count; i++)
+            if ((*keys)[i].field == f)
+                return 0;
+
+        SortKey* tmp = realloc(*keys, (*count + 1) * sizeof(SortKey));
+        if (!tmp) return 0;
+
+        *keys = tmp;
+
+        (*keys)[*count].field = f;
+        if (!strcmp(ord, "asc")) (*keys)[*count].order = ORDER_ASC;
+        else if (!strcmp(ord, "desc")) (*keys)[*count].order = ORDER_DESC;
+        else return 0;
+
+        (*count)++;
+    }
+
+    return *count > 0;
+}
+
+
+Node* split(Node* head) {
+    Node* slow = head;
+    Node* fast = head->next;
+
+    while (fast && fast->next) {
+        slow = slow->next;
+        fast = fast->next->next;
+    }
+
+    Node* mid = slow->next;
+    slow->next = NULL;
+
+    return mid;
+}
+
+
+int compare_nodes(Node* a, Node* b, SortKey* keys, int n) {
+    for (int i = 0; i < n; i++) {
+
+        int cmp = 0;
+
+        switch (keys[i].field) {
+
+        case 0:
+            cmp = (a->unit_id > b->unit_id) - (a->unit_id < b->unit_id);
+            break;
+
+        case 1:
+            cmp = strcmp(a->unit_model, b->unit_model);
+            break;
+
+        case 2:
+            cmp = cmp_carnum(a->carnum, b->carnum, OP_GT) - cmp_carnum(a->carnum, b->carnum, OP_LT);
+            break;
+
+        case 3:
+            cmp = cmp_date(a->chk_date, b->chk_date, OP_GT) - cmp_date(a->chk_date, b->chk_date, OP_LT);
+            break;
+
+        case 5:
+            cmp = strcmp(a->mechanic, b->mechanic);
+            break;
+
+        case 6:
+            cmp = strcmp(a->driver, b->driver);
+            break;
+        }
+
+        if (cmp != 0) {
+
+            if (keys[i].order == ORDER_DESC)
+                cmp = -cmp;
+
+            return cmp;
+        }
+    }
+
+    return 0;
+}
+
+
+Node* merge(Node* a, Node* b, SortKey* keys, int n) {
+    Node dummy;
+    Node* tail = &dummy;
+
+    while (a && b) {
+        if (compare_nodes(a, b, keys, n) <= 0) {
+            tail->next = a;
+            a = a->next;
+        } else {
+            tail->next = b;
+            b = b->next;
+        }
+
+        tail = tail->next;
+    }
+
+    tail->next = a ? a : b;
+
+    return dummy.next;
+}
+
+
+Node* merge_sort(Node* head, SortKey* keys, int n) {
+    if (!head || !head->next)
+        return head;
+
+    Node* mid = split(head);
+
+    head = merge_sort(head, keys, n);
+    mid  = merge_sort(mid, keys, n);
+
+    return merge(head, mid, keys, n);
+}
+
+
+void sort_db(char* line, FILE* out, Queue* q) {
+    char* args = trim(line + 4);
+
+    SortKey* keys = NULL;
+    int key_count = 0;
+
+    if (!parse_sort_keys(args, &keys, &key_count))
+        goto error;
+
+    q->head = merge_sort(q->head, keys, key_count);
+
+    fprintf(out, "sort:%d\n", q->size);
+
+    free(keys);
+    return;
+
+error:
+    fprintf(out, "incorrect:'%.20s'\n", line);
+    free(keys);
+}
+
+
 void read_input(FILE* input, FILE* output, Queue* queue) {
     char* line = NULL;
     size_t cap = 0;
@@ -1158,7 +1337,7 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
             uniq_db(line, output, queue);
             
         } else if (strncmp(line, "sort", 4) == 0 && line[4] == ' ') {
-            fprintf(output, "sort:0\n");
+            sort_db(line, output, queue);
             
         } else {
             fprintf(output, "incorrect:'%.20s'\n", line);
