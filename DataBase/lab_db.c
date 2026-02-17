@@ -25,8 +25,8 @@ typedef struct {
 // the basic structure of the database
 typedef struct Node {
     int unit_id;
-    char unit_model[16];
-    char carnum[16];
+    char unit_model[256];
+    char carnum[256];
     Date chk_date;
     Status status;
     char mechanic[256];
@@ -140,7 +140,7 @@ int parse_double_quoted_string(char* value, char* dest, size_t max)
     value[len - 1] = '\0';
     value++;
 
-    if (strlen(value) >= max)
+    if (len >= max)
         return 0;
 
     strcpy(dest, value);
@@ -286,21 +286,51 @@ const char* status_to_string(Status s) {
     return "'unknown'";
 }
 
+char* next_token(char** src, char sep)
+{
+    if (!*src || !**src)
+        return NULL;
+
+    char* start = *src;
+    char* p = start;
+
+    int in_quotes = 0;
+
+    while (*p) {
+        if (*p == '\"')
+            in_quotes = !in_quotes;
+
+        else if (*p == sep && !in_quotes)
+            break;
+
+        p++;
+    }
+
+    if (*p == ',') {
+        *p = '\0';
+        *src = p + 1;
+    } else {
+        *src = NULL;
+    }
+
+    return start;
+}
+
+
 // function insert
 void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
-    char* copy = strdup(args);
+    char* copy = trim(strdup(args));
 
     if (*args == '\0') goto error;
     if (!copy) goto error;
 
     char* seen[FIELD_COUNT] = {0};
-
-    char* saveptr;
-    char* token = strtok_r(copy, ",", &saveptr);
-
-    while (token) {
+    
+    char* token;
+    
+    while ((token = next_token(&copy, ','))) {
 
         char* eq = strchr(token, '=');
         if (!eq) goto error;
@@ -325,8 +355,6 @@ void insert_db(char* line, FILE* output, Queue* queue) {
 
         if (!found)
             goto error;
-
-        token = strtok_r(NULL, ",", &saveptr);
     }
 
     for (int i = 0; i < FIELD_COUNT; i++)
@@ -379,11 +407,10 @@ error:
 int parse_field_list(char* str, int** fields, int* count) {
     *fields = NULL;
     *count = 0;
+    
+    char* token;
 
-    char* saveptr;
-    char* token = strtok_r(str, ",", &saveptr);
-
-    while (token) {
+    while ((token = next_token(&str, ','))) {
 
         token = trim(token);
 
@@ -408,8 +435,6 @@ int parse_field_list(char* str, int** fields, int* count) {
         (*fields)[*count] = field;
 
         (*count)++;
-
-        token = strtok_r(NULL, ",", &saveptr);
     }
 
     return *count > 0;
@@ -531,17 +556,14 @@ int parse_condition_value(Condition* c, char* value) {
                 if (*value == '\0')
                     return 1;
                 
-                char* saveptr;
-                char* token = strtok_r(value, ",", &saveptr);
-                while (token) {
+                char* token;
+                while ((token = next_token(&value, ','))) {
                     if (c->value.status.count >= MAX_STATUS)
                          return 0;
                     
                     token = trim(token);
                     if (!parse_status(token, &c->value.status.list[c->value.status.count])) return 0;
                     c->value.status.count++;
-                    
-                    token = strtok_r(NULL, ",", &saveptr);
                 }
                 return c->value.status.count > 0;;
             } else {
@@ -561,10 +583,9 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
     *conds = NULL;
     *count = 0;
 
-    char* saveptr;
-    char* token = strtok_r(cond_str, " ", &saveptr);
+    char* token;
 
-    while (token) {
+    while ((token = next_token(&cond_str, ' '))) {
         Condition* tmp = realloc(*conds, (*count + 1) * sizeof(Condition));
 
         if (!tmp)
@@ -603,8 +624,6 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
             return 0;
 
         (*count)++;
-
-        token = strtok_r(NULL, " ", &saveptr);
     }
 
     return 1;
@@ -860,10 +879,8 @@ int parse_updates(char* str, Update** upds, int* count) {
     *count = 0;
 
     char* token;
-    char* saveptr;
-    token = strtok_r(str, ",", &saveptr);
 
-    while (token) {
+    while ((token = next_token(&str, ','))) {
         token = trim(token);
 
         char* eq = strchr(token, '=');
@@ -900,8 +917,6 @@ int parse_updates(char* str, Update** upds, int* count) {
         memcpy(&u->value, &fake.value, sizeof(u->value));
 
         (*count)++;
-
-        token = strtok_r(NULL, ",", &saveptr);
     }
 
     return *count > 0;
@@ -1028,10 +1043,10 @@ int nodes_equal(Node* a, Node* b, int* fields, int count) {
             break;
 
         case 5:
-            if (strcmp(a->driver, b->driver)) return 0;
+            if (strcmp(a->mechanic, b->mechanic)) return 0;
             break;
         case 6:
-            if (strcmp(a->mechanic, b->mechanic)) return 0;
+            if (strcmp(a->driver, b->driver)) return 0;
             break;
         }
     }
@@ -1040,7 +1055,7 @@ int nodes_equal(Node* a, Node* b, int* fields, int count) {
 }
 
 
-void uniq_db(char* args, Queue* q, FILE* out) {
+void uniq_db(char* args, FILE* out, Queue* q) {
     args = trim(args + 4);
     reverse_queue(q);
     
@@ -1100,9 +1115,12 @@ void uniq_db(char* args, Queue* q, FILE* out) {
     free(seen);
 
     fprintf(out, "uniq:%d\n", removed);
+    return;
+    
 error:
     fprintf(out, "incorrect:'%.20s'\n", args);
     free(seen);
+    return;
 }
 
 
@@ -1129,7 +1147,7 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
             update_db(line, output, queue);
             
         } else if (strncmp(line, "uniq", 4) == 0 && line[4] == ' ') {
-            fprintf(output, "uniq:0\n");
+            uniq_db(line, output, queue);
             
         } else if (strncmp(line, "sort", 4) == 0 && line[4] == ' ') {
             fprintf(output, "sort:0\n");
