@@ -1017,6 +1017,14 @@ void reverse_queue(Queue* q) {
     q->head = prev;
 }
 
+int check_carnum(char* a, char* b) {
+    if (strncmp(a, b, 6)) return 1;
+    int reg_a = atoi(a + 6);
+    int reg_b = atoi(b + 6);
+
+    return reg_a != reg_b;
+}
+
 int nodes_equal(Node* a, Node* b, int* fields, int count) {
     for (int i = 0; i < count; i++) {
         switch (fields[i]) {
@@ -1030,7 +1038,7 @@ int nodes_equal(Node* a, Node* b, int* fields, int count) {
             break;
                 
         case 2:
-            if (strcmp(a->carnum, b->carnum)) return 0;
+            if (check_carnum(a->carnum, b->carnum)) return 0;
             break;
             
         case 3:
