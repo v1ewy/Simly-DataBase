@@ -314,7 +314,7 @@ char* next_token(char** src, char sep)
         p++;
     }
 
-    if (*p == ',') {
+    if (*p == sep) {
         *p = '\0';
         *src = p + 1;
     } else {
@@ -329,11 +329,12 @@ char* next_token(char** src, char sep)
 void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = malloc(sizeof(Node));
     char* args = line + 6;
-    char* copy = trim(strdup(args));
+    char* copy = strdup(args);
 
     if (*args == '\0') goto error;
     if (!copy) goto error;
-
+    
+    copy = trim(copy);
     char* seen[FIELD_COUNT] = {0};
     
     char* token;
@@ -1012,6 +1013,8 @@ error:
 }
 
 void reverse_queue(Queue* q) {
+    Node* old_head = q->head;
+
     Node* prev = NULL;
     Node* cur = q->head;
 
@@ -1023,6 +1026,7 @@ void reverse_queue(Queue* q) {
     }
 
     q->head = prev;
+    q->tail = old_head;
 }
 
 int check_carnum(char* a, char* b) {
@@ -1349,14 +1353,12 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
 }
 
 void free_db(struct Queue* queue) {
-    int cnt_task = 0;
     struct Node* current = queue->head;
     struct Node* next;
     while (current != NULL) {
         next = current->next;
         free(current);
         current = next;
-        cnt_task++;
     }
     
     queue->head = NULL;
