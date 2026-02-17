@@ -148,7 +148,7 @@ int parse_double_quoted_string(char* value, char* dest, size_t max)
     value[len - 1] = '\0';
     value++;
 
-    if (len >= max)
+    if (strlen(value) >= max)
         return 0;
 
     strcpy(dest, value);
@@ -872,7 +872,8 @@ void delete_db(char* line, FILE* output, Queue* queue) {
 
         cur = next;
     }
-
+    
+    queue->size -= deleted;
     fprintf(output, "delete:%d\n", deleted);
 
     free(conds);
