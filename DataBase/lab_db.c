@@ -6,6 +6,10 @@
 #define FIELD_COUNT 7
 #define MAX_STATUS 5
 
+int cnt_malloc = 0;
+int cnt_realloc = 0;
+int cnt_free = 0;
+
 //enum for a status
 typedef enum {
     well,
@@ -320,7 +324,9 @@ char* next_token(char** src, char sep)
     } else {
         *src = NULL;
     }
-
+    
+    if (*src) *src = trim(*src);
+    
     return start;
 }
 
@@ -328,6 +334,7 @@ char* next_token(char** src, char sep)
 // function insert
 void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = malloc(sizeof(Node));
+    cnt_malloc++;
     char* args = line + 6;
     char* copy = strdup(args);
 
@@ -404,12 +411,15 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     fprintf(output, "insert:%d\n", ++queue->size);
     
     free(copy);
+    cnt_free++;
     return;
 
 error:
     fprintf(output, "incorrect:'%.20s'\n", line);
     free(copy);
+    cnt_free++;
     free(new_node);
+    cnt_free++;
 }
 
 
@@ -436,6 +446,8 @@ int parse_field_list(char* str, int** fields, int* count) {
             return 0;
 
         int* tmp = realloc(*fields, (*count + 1) * sizeof(int));
+        if (*fields != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         if (!tmp)
             return 0;
@@ -596,6 +608,8 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
 
     while ((token = next_token(&cond_str, ' '))) {
         Condition* tmp = realloc(*conds, (*count + 1) * sizeof(Condition));
+        if (*conds != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         if (!tmp)
             return 0;
@@ -824,13 +838,17 @@ void select_db(char* line, FILE* output, Queue* queue) {
     }
     
     free(fields);
+    cnt_free++;
     free(conds);
+    cnt_free++;
     return;
 
 error:
     fprintf(output, "incorrect:'%.20s'\n", line);
     free(fields);
+    cnt_free++;
     free(conds);
+    cnt_free++;
     return;
 }
 
@@ -864,6 +882,7 @@ void delete_db(char* line, FILE* output, Queue* queue) {
             if (queue->tail == cur) queue->tail = prev;
 
             free(cur);
+            cnt_free++;
             deleted++;
             
         } else {
@@ -877,11 +896,13 @@ void delete_db(char* line, FILE* output, Queue* queue) {
     fprintf(output, "delete:%d\n", deleted);
 
     free(conds);
+    cnt_free++;
     return;
 
 error:
     fprintf(output, "incorrect:'%.20s'\n", line);
     free(conds);
+    cnt_free++;
 }
 
 int parse_updates(char* str, Update** upds, int* count) {
@@ -911,6 +932,9 @@ int parse_updates(char* str, Update** upds, int* count) {
         if (id == -1) return 0;
 
         Update* tmp = realloc(*upds, (*count + 1) * sizeof(Update));
+        if (*upds != NULL) cnt_realloc++;
+        else cnt_malloc++;
+        
         if (!tmp) return 0;
 
         *upds = tmp;
@@ -1004,13 +1028,17 @@ void update_db(char* line, FILE* out, Queue* q) {
     fprintf(out, "update:%d\n", updated);
 
     free(upds);
+    cnt_free++;
     free(conds);
+    cnt_free++;
     return;
 
 error:
     fprintf(out, "incorrect:'%.20s'\n", line);
     free(upds);
+    cnt_free++;
     free(conds);
+    cnt_free++;
 }
 
 void reverse_queue(Queue* q) {
@@ -1116,11 +1144,14 @@ void uniq_db(char* args, FILE* out, Queue* q) {
             cur = cur->next;
 
             free(del);
+            cnt_free++;
             removed++;
             continue;
         }
 
         Node** tmp = realloc(seen, (seen_count + 1) * sizeof(Node*));
+        if (seen != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         if (!tmp) break;
 
@@ -1134,6 +1165,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
     reverse_queue(q);
 
     free(seen);
+    cnt_free++;
 
     fprintf(out, "uniq:%d\n", removed);
     return;
@@ -1141,6 +1173,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
 error:
     fprintf(out, "incorrect:'%.20s'\n", args);
     free(seen);
+    cnt_free++;
     return;
 }
 
@@ -1182,6 +1215,9 @@ int parse_sort_keys(char* str, SortKey** keys, int* count)
                 return 0;
 
         SortKey* tmp = realloc(*keys, (*count + 1) * sizeof(SortKey));
+        if (*keys != NULL) cnt_realloc++;
+        else cnt_malloc++;
+        
         if (!tmp) return 0;
 
         *keys = tmp;
@@ -1308,11 +1344,13 @@ void sort_db(char* line, FILE* out, Queue* q) {
     fprintf(out, "sort:%d\n", q->size);
 
     free(keys);
+    cnt_free++;
     return;
 
 error:
     fprintf(out, "incorrect:'%.20s'\n", line);
     free(keys);
+    cnt_free++;
 }
 
 
@@ -1351,6 +1389,7 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
     }
     
     free(line);
+    cnt_free++;
 }
 
 void free_db(struct Queue* queue) {
@@ -1359,6 +1398,7 @@ void free_db(struct Queue* queue) {
     while (current != NULL) {
         next = current->next;
         free(current);
+        cnt_free++;
         current = next;
     }
     
@@ -1371,6 +1411,7 @@ void free_db(struct Queue* queue) {
 int main(void) {
     FILE* input = fopen("input.txt", "r");
     FILE* output = fopen("output.txt", "w");
+    FILE* memstat = fopen("memstat.txt", "w");
     if (!input || !output) {
         return 1;
     }
@@ -1381,6 +1422,10 @@ int main(void) {
     read_input(input, output, &queue);
     
     free_db(&queue);
+    
+    fprintf(memstat, "malloc:%d\n", cnt_malloc);
+    fprintf(memstat, "realloc:%d\n", cnt_realloc);
+    fprintf(memstat, "free:%d\n", cnt_free);
     
     fclose(input);
     fclose(output);
