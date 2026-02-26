@@ -11,6 +11,7 @@
 int cnt_malloc = 0;
 int cnt_realloc = 0;
 int cnt_free = 0;
+int cnt_strdup = 0;
 
 //enum for a status
 typedef enum {
@@ -176,7 +177,7 @@ int valid_letter(char c) {
 
 // function of parsing carnum
 int parse_carnum(char* value, char* dest, size_t max) {
-    int len = (int)strlen(value);
+    size_t len = strlen(value);
 
     if (len < 2 || value[0] != '\'' || value[len - 1] != '\'')
         return 0;
@@ -184,7 +185,7 @@ int parse_carnum(char* value, char* dest, size_t max) {
     value[len - 1] = '\0';
     value++;
 
-    len = (int)strlen(value);
+    len = strlen(value);
 
     if (len != 8 && len != 9)
         return 0;
@@ -199,7 +200,7 @@ int parse_carnum(char* value, char* dest, size_t max) {
     if (!valid_letter(value[4]) || !valid_letter(value[5]))
         return 0;
 
-    for (int i = 6; i < len; i++)
+    for (int i = 6; i < (int)len; i++)
         if (!isdigit(value[i]))
             return 0;
 
@@ -345,14 +346,17 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = (Node*)malloc(sizeof(Node));
     cnt_malloc++;
     char* args = line + 6;
+    
     char* copy = strdup(args);
-    cnt_malloc++;
+    cnt_strdup++;
+    char* original_copy = copy;
+    
+    char* seen[FIELD_COUNT] = {0};
 
     if (*args == '\0') goto error;
     if (!copy) goto error;
-    
+
     copy = trim(copy);
-    char* seen[FIELD_COUNT] = {0};
     
     char* token;
     
@@ -421,13 +425,13 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     fprintf(output, "insert:%d\n", ++queue->size);
     
     
-    free(copy);
+    free(original_copy);
     cnt_free++;
     return;
 
 error:
     fprintf(output, "incorrect:'%.20s'\n", line);
-    free(copy);
+    free(original_copy);
     cnt_free++;
     free(new_node);
     cnt_free++;
@@ -457,11 +461,11 @@ int parse_field_list(char* str, int** fields, int* count) {
             return 0;
 
         int* tmp = (int*)realloc(*fields, (*count + 1) * sizeof(int));
-        if (*fields != NULL) cnt_realloc++;
-        else cnt_malloc++;
-
         if (!tmp)
             return 0;
+        
+        if (*fields != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         *fields = tmp;
         (*fields)[*count] = field;
@@ -619,11 +623,10 @@ int parse_conditions(char* cond_str, Condition** conds, int* count) {
 
     while ((token = next_token(&cond_str, ' '))) {
         Condition* tmp = (Condition*)realloc(*conds, (*count + 1) * sizeof(Condition));
-        if (*conds != NULL) cnt_realloc++;
-        else cnt_malloc++;
-
         if (!tmp)
             return 0;
+        if (*conds != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         *conds = tmp;
 
@@ -806,18 +809,19 @@ int check_conditions(Node* n, Condition* conds, int count) {
 
 void select_db(char* line, FILE* output, Queue* queue) {
     char* args = line + 6;
+    args = trim(args);
     
     int* fields = NULL;
     int field_count;
     
     Condition* conds = NULL;
     int cond_count = 0;
-
-    if (*args == '\0') goto error;
-    
-    args = trim(args);
     
     char* cond = strchr(args, ' ');
+    
+    int found = 0;
+
+    if (*args == '\0') goto error;
     
     if (cond) {
         *cond++ = '\0';
@@ -826,8 +830,6 @@ void select_db(char* line, FILE* output, Queue* queue) {
     }
     
     if (!parse_field_list(args, &fields, &field_count)) goto error;
-    
-    int found = 0;
     
     for (Node* cur = queue->head; cur; cur = cur->next) {
         if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
@@ -872,6 +874,11 @@ void delete_db(char* line, FILE* output, Queue* queue) {
 
     Condition* conds = NULL;
     int cond_count = 0;
+    
+    Node* cur = queue->head;
+    Node* prev = NULL;
+    
+    int deleted = 0;
 
     if (*args == '\0') goto error;
 
@@ -879,11 +886,6 @@ void delete_db(char* line, FILE* output, Queue* queue) {
 
     if (!parse_conditions(args, &conds, &cond_count))
         goto error;
-
-    Node* cur = queue->head;
-    Node* prev = NULL;
-
-    int deleted = 0;
 
     while (cur) {
         Node* next = cur->next;
@@ -949,10 +951,10 @@ int parse_updates(char* str, Update** upds, int* count) {
         if (id == -1) return 0;
 
         Update* tmp = (Update*)realloc(*upds, (*count + 1) * sizeof(Update));
-        if (*upds != NULL) cnt_realloc++;
-        else cnt_malloc++;
         
         if (!tmp) return 0;
+        if (*upds != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         *upds = tmp;
 
@@ -1016,10 +1018,12 @@ void update_db(char* line, FILE* out, Queue* q) {
 
     Condition* conds = NULL;
     int cond_count = 0;
+    
+    char* cond = strchr(args, ' ');
+    int updated = 0;
+
 
     if (*args == '\0') goto error;
-
-    char* cond = strchr(args, ' ');
 
     if (cond) {
         *cond++ = '\0';
@@ -1030,8 +1034,6 @@ void update_db(char* line, FILE* out, Queue* q) {
 
     if (!parse_updates(args, &upds, &upd_count))
         goto error;
-
-    int updated = 0;
 
     for (Node* cur = q->head; cur; cur = cur->next) {
 
@@ -1171,10 +1173,11 @@ void uniq_db(char* args, FILE* out, Queue* q) {
         }
 
         Node** tmp = (Node**)realloc(seen, (seen_count + 1) * sizeof(Node*));
-        if (seen != NULL) cnt_realloc++;
-        else cnt_malloc++;
 
         if (!tmp) break;
+        
+        if (seen != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         seen = tmp;
         seen[seen_count++] = cur;
@@ -1240,10 +1243,11 @@ int parse_sort_keys(char* str, SortKey** keys, int* count)
                 return 0;
 
         SortKey* tmp = (SortKey*)realloc(*keys, (*count + 1) * sizeof(SortKey));
-        if (*keys != NULL) cnt_realloc++;
-        else cnt_malloc++;
         
         if (!tmp) return 0;
+        
+        if (*keys != NULL) cnt_realloc++;
+        else cnt_malloc++;
 
         *keys = tmp;
 
@@ -1385,11 +1389,10 @@ error:
 char* read_dynamic_line(FILE* input, size_t* line_length) {
     size_t buffer_size = INITIAL_BUFFER_SIZE;
     char* buffer = (char*)malloc(buffer_size);
-    cnt_malloc++;
-    
     if (!buffer) {
         return NULL;
     }
+    cnt_malloc++;
     
     buffer[0] = '\0';
     size_t pos = 0;
@@ -1414,13 +1417,14 @@ char* read_dynamic_line(FILE* input, size_t* line_length) {
         if (pos >= buffer_size - 1) {
             size_t new_size = buffer_size * BUFFER_GROWTH_FACTOR;
             char* new_buffer = (char*)realloc(buffer, new_size);
-            if (new_buffer) {
-                cnt_realloc++;
-                buffer = new_buffer;
-                buffer_size = new_size;
-            } else {
-                break;
+            if (!new_buffer) {
+                free(buffer);
+                cnt_free++;
+                return NULL;
             }
+            cnt_realloc++;
+            buffer = new_buffer;
+            buffer_size = new_size;
         }
     }
     
@@ -1435,6 +1439,9 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
     while ((line = read_dynamic_line(input, &line_length)) != NULL) {
         if (line_length > 0 && line[line_length - 1] == '\n') {
             line[line_length - 1] = '\0';
+            if (line[line_length - 2] == '\r') {
+                line[line_length - 2] = '\0';
+            }
         }
         
         if (line[0] == '\0') {
@@ -1490,7 +1497,10 @@ int main(void) {
     FILE* input = fopen("input.txt", "r");
     FILE* output = fopen("output.txt", "w");
     FILE* memstat = fopen("memstat.txt", "w");
-    if (!input || !output) {
+    if (!input || !output || !memstat) {
+        if (input) fclose(input);
+        if (output) fclose(output);
+        if (memstat) fclose(memstat);
         return 1;
     }
     
@@ -1502,6 +1512,7 @@ int main(void) {
     free_db(&queue);
     
     fprintf(memstat, "malloc:%d\n", cnt_malloc);
+    fprintf(memstat, "strdup:%d\n", cnt_strdup);
     fprintf(memstat, "realloc:%d\n", cnt_realloc);
     fprintf(memstat, "free:%d", cnt_free);
     

@@ -249,7 +249,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = 3JVT7H47NV;
 				ENABLE_HARDENED_RUNTIME = YES;
+				OTHER_CFLAGS = "-fsanitize=address";
+				OTHER_LDFLAGS = "-fsanitize=address";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				WARNING_CFLAGS = "-fsanitize=address";
 			};
 			name = Debug;
 		};
