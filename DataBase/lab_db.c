@@ -1,7 +1,9 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <limits.h>
 
 #define FIELD_COUNT 7
 #define MAX_STATUS 5
@@ -140,7 +142,7 @@ int parse_int(const char* s, int* out) {
     if (*s == '\0' || *end != '\0')
         return 0;
     
-    if (val < 2147483648 && val > -2147483649) {
+    if (val <= INT_MAX && val >= INT_MIN) {
         *out = (int)val;
         return 1;
     }
@@ -331,12 +333,12 @@ char* next_token(char** src, char sep)
     if (*p == sep) {
         *p = '\0';
         *src = p + 1;
-    } else {
+    }else {
         *src = NULL;
     }
-    
+
     if (*src) *src = trim(*src);
-    
+
     return start;
 }
 
@@ -346,20 +348,20 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     Node* new_node = (Node*)malloc(sizeof(Node));
     cnt_malloc++;
     char* args = line + 6;
-    
+
     char* copy = strdup(args);
     cnt_strdup++;
     char* original_copy = copy;
-    
-    char* seen[FIELD_COUNT] = {0};
+
+    char* seen[FIELD_COUNT] = { 0 };
 
     if (*args == '\0') goto error;
     if (!copy) goto error;
 
     copy = trim(copy);
-    
+
     char* token;
-    
+
     while ((token = next_token(&copy, ','))) {
 
         char* eq = strchr(token, '=');
@@ -390,7 +392,7 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     for (int i = 0; i < FIELD_COUNT; i++)
         if (!seen[i]) goto error;
 
-    
+
     if (!parse_int(seen[0], &new_node->unit_id)) {
         goto error;
     }
@@ -423,8 +425,6 @@ void insert_db(char* line, FILE* output, Queue* queue) {
     }
 
     fprintf(output, "insert:%d\n", ++queue->size);
-    
-    
     free(original_copy);
     cnt_free++;
     return;
@@ -441,7 +441,7 @@ error:
 int parse_field_list(char* str, int** fields, int* count) {
     *fields = NULL;
     *count = 0;
-    
+
     char* token;
 
     while ((token = next_token(&str, ','))) {
@@ -463,7 +463,7 @@ int parse_field_list(char* str, int** fields, int* count) {
         int* tmp = (int*)realloc(*fields, (*count + 1) * sizeof(int));
         if (!tmp)
             return 0;
-        
+
         if (*fields != NULL) cnt_realloc++;
         else cnt_malloc++;
 
@@ -495,12 +495,12 @@ void print_field(FILE* out, Node* n, int field) {
 
     case 3:
         fprintf(out, "chk_date='%02d.%02d.%d'",
-                n->chk_date.day, n->chk_date.month, n->chk_date.year);
+            n->chk_date.day, n->chk_date.month, n->chk_date.year);
         break;
 
     case 4:
         fprintf(out, "status=%s",
-                status_to_string(n->status));
+            status_to_string(n->status));
         break;
 
     case 5:
@@ -574,7 +574,7 @@ int parse_condition_value(Condition* c, char* value) {
 
         case 1:
             return parse_double_quoted_string(value, c->value.str, sizeof(c->value.str));
-            
+
         case 2:
             return parse_carnum(value, c->value.carnum, sizeof(c->value.carnum));
 
@@ -584,25 +584,26 @@ int parse_condition_value(Condition* c, char* value) {
         case 4:
             if (value[0] == '[') {
                 size_t len = strlen(value);
-                value[len-1] = '\0';
+                value[len - 1] = '\0';
                 value++;
 
                 c->value.status.count = 0;
-                
+
                 if (*value == '\0')
                     return 1;
-                
+
                 char* token;
                 while ((token = next_token(&value, ','))) {
                     if (c->value.status.count >= MAX_STATUS)
-                         return 0;
-                    
+                        return 0;
+
                     token = trim(token);
                     if (!parse_status(token, &c->value.status.list[c->value.status.count])) return 0;
                     c->value.status.count++;
                 }
                 return 1;
-            } else {
+            }
+            else {
                 c->value.status.count = 1;
                 return parse_status(value, &c->value.status.list[0]);
             }
@@ -768,7 +769,7 @@ int check_condition(Node* n, Condition* c) {
 
         case 4: {
             Status s = n->status;
-            
+
             if (c->value.status.count == 0) {
 
                 if (c->op == OP_IN)
@@ -777,18 +778,18 @@ int check_condition(Node* n, Condition* c) {
                 if (c->op == OP_NOT_IN)
                     return 1;
             }
-            
+
             if (c->op == OP_IN)
                 return status_in(s, c->value.status.list, c->value.status.count);
-            
+
             if (c->op == OP_NOT_IN)
                 return !status_in(s, c->value.status.list, c->value.status.count);
-            
+
             return cmp_int((int)s, (int)c->value.status.list[0], c->op);
         }
         case 5:
             return cmp_str(n->mechanic, c->value.str, c->op);
-            
+
         case 6:
             return cmp_str(n->driver, c->value.str, c->op);
     }
@@ -810,37 +811,37 @@ int check_conditions(Node* n, Condition* conds, int count) {
 void select_db(char* line, FILE* output, Queue* queue) {
     char* args = line + 6;
     args = trim(args);
-    
+
     int* fields = NULL;
     int field_count;
-    
+
     Condition* conds = NULL;
     int cond_count = 0;
-    
+
     char* cond = strchr(args, ' ');
-    
+
     int found = 0;
 
     if (*args == '\0') goto error;
-    
+
     if (cond) {
         *cond++ = '\0';
         cond = trim(cond);
         if (!parse_conditions(cond, &conds, &cond_count)) goto error;
     }
-    
+
     if (!parse_field_list(args, &fields, &field_count)) goto error;
-    
+
     for (Node* cur = queue->head; cur; cur = cur->next) {
         if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
         found++;
     }
 
     fprintf(output, "select:%d\n", found);
-    
+
     for (Node* cur = queue->head; cur; cur = cur->next) {
         if (cond_count && !check_conditions(cur, conds, cond_count)) continue;
-        
+
         for (int i = 0; i < field_count; i++) {
             print_field(output, cur, fields[i]);
 
@@ -874,10 +875,10 @@ void delete_db(char* line, FILE* output, Queue* queue) {
 
     Condition* conds = NULL;
     int cond_count = 0;
-    
+
     Node* cur = queue->head;
     Node* prev = NULL;
-    
+
     int deleted = 0;
 
     if (*args == '\0') goto error;
@@ -897,18 +898,18 @@ void delete_db(char* line, FILE* output, Queue* queue) {
                 queue->head = next;
 
             if (queue->tail == cur) queue->tail = prev;
-            
+
             free(cur);
             cnt_free++;
             deleted++;
-            
+
         } else {
             prev = cur;
         }
 
         cur = next;
     }
-    
+
     queue->size -= deleted;
     fprintf(output, "delete:%d\n", deleted);
 
@@ -951,7 +952,7 @@ int parse_updates(char* str, Update** upds, int* count) {
         if (id == -1) return 0;
 
         Update* tmp = (Update*)realloc(*upds, (*count + 1) * sizeof(Update));
-        
+
         if (!tmp) return 0;
         if (*upds != NULL) cnt_realloc++;
         else cnt_malloc++;
@@ -979,46 +980,46 @@ void apply_update(Node* n, Update* upds, int count) {
     for (int i = 0; i < count; i++) {
         switch (upds[i].field) {
 
-        case 0:
-            n->unit_id = upds[i].value.i;
-            break;
-                
-        case 1:
-            strcpy(n->unit_model, upds[i].value.str);
-            break;
-        
-        case 2:
-            strcpy(n->carnum, upds[i].value.carnum);
-            break;
-                
-        case 3:
-            n->chk_date = upds[i].value.date;
-            break;
+            case 0:
+                n->unit_id = upds[i].value.i;
+                break;
 
-        case 4:
-            n->status = upds[i].value.status;
-            break;
+            case 1:
+                strcpy(n->unit_model, upds[i].value.str);
+                break;
 
-        case 5:
-            strcpy(n->mechanic, upds[i].value.str);
-            break;
-                
-        case 6:
-            strcpy(n->driver, upds[i].value.str);
-            break;
+            case 2:
+                strcpy(n->carnum, upds[i].value.carnum);
+                break;
+
+            case 3:
+                n->chk_date = upds[i].value.date;
+                break;
+
+            case 4:
+                n->status = upds[i].value.status;
+                break;
+
+            case 5:
+                strcpy(n->mechanic, upds[i].value.str);
+                break;
+
+            case 6:
+                strcpy(n->driver, upds[i].value.str);
+                break;
         }
     }
 }
 
 void update_db(char* line, FILE* out, Queue* q) {
     char* args = trim(line + 6);
-    
+
     Update* upds = NULL;
     int upd_count = 0;
 
     Condition* conds = NULL;
     int cond_count = 0;
-    
+
     char* cond = strchr(args, ' ');
     int updated = 0;
 
@@ -1096,15 +1097,15 @@ int nodes_equal(Node* a, Node* b, int* fields, int count) {
         case 0:
             if (a->unit_id != b->unit_id) return 0;
             break;
-                
+
         case 1:
             if (strcmp(a->unit_model, b->unit_model)) return 0;
             break;
-                
+
         case 2:
             if (check_carnum(a->carnum, b->carnum)) return 0;
             break;
-            
+
         case 3:
             if (memcmp(&a->chk_date, &b->chk_date, sizeof(Date)))
                 return 0;
@@ -1130,7 +1131,7 @@ int nodes_equal(Node* a, Node* b, int* fields, int count) {
 void uniq_db(char* args, FILE* out, Queue* q) {
     args = trim(args + 4);
     reverse_queue(q);
-    
+
     int* fields = NULL;
     int field_count;
 
@@ -1141,7 +1142,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
     Node* cur = q->head;
 
     int removed = 0;
-    
+
     if (!parse_field_list(args, &fields, &field_count)) goto error;
 
     while (cur) {
@@ -1165,7 +1166,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
                 q->head = cur->next;
 
             cur = cur->next;
-            
+
             free(del);
             cnt_free++;
             removed++;
@@ -1175,7 +1176,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
         Node** tmp = (Node**)realloc(seen, (seen_count + 1) * sizeof(Node*));
 
         if (!tmp) break;
-        
+
         if (seen != NULL) cnt_realloc++;
         else cnt_malloc++;
 
@@ -1187,7 +1188,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
     }
 
     reverse_queue(q);
-    
+
     free(seen);
     cnt_free++;
     free(fields);
@@ -1195,7 +1196,7 @@ void uniq_db(char* args, FILE* out, Queue* q) {
 
     fprintf(out, "uniq:%d\n", removed);
     return;
-    
+
 error:
     fprintf(out, "incorrect:'%.20s'\n", args);
     free(seen);
@@ -1221,7 +1222,7 @@ int parse_sort_keys(char* str, SortKey** keys, int* count)
         *eq = '\0';
 
         char* field = trim(token);
-        char* ord   = trim(eq + 1);
+        char* ord = trim(eq + 1);
 
         int f = -1;
 
@@ -1243,9 +1244,9 @@ int parse_sort_keys(char* str, SortKey** keys, int* count)
                 return 0;
 
         SortKey* tmp = (SortKey*)realloc(*keys, (*count + 1) * sizeof(SortKey));
-        
+
         if (!tmp) return 0;
-        
+
         if (*keys != NULL) cnt_realloc++;
         else cnt_malloc++;
 
@@ -1353,7 +1354,7 @@ Node* merge_sort(Node* head, SortKey* keys, int n) {
     Node* mid = split(head);
 
     head = merge_sort(head, keys, n);
-    mid  = merge_sort(mid, keys, n);
+    mid = merge_sort(mid, keys, n);
 
     return merge(head, mid, keys, n);
 }
@@ -1393,10 +1394,10 @@ char* read_dynamic_line(FILE* input, size_t* line_length) {
         return NULL;
     }
     cnt_malloc++;
-    
+
     buffer[0] = '\0';
     size_t pos = 0;
-    
+
     while (1) {
         if (fgets(buffer + pos, (int)(buffer_size - pos), input) == NULL) {
             if (pos == 0) {
@@ -1406,14 +1407,14 @@ char* read_dynamic_line(FILE* input, size_t* line_length) {
             }
             break;
         }
-        
+
         size_t len = strlen(buffer + pos);
         pos += len;
-        
+
         if (len > 0 && buffer[pos - 1] == '\n') {
             break;
         }
-        
+
         if (pos >= buffer_size - 1) {
             size_t new_size = buffer_size * BUFFER_GROWTH_FACTOR;
             char* new_buffer = (char*)realloc(buffer, new_size);
@@ -1427,7 +1428,7 @@ char* read_dynamic_line(FILE* input, size_t* line_length) {
             buffer_size = new_size;
         }
     }
-    
+
     *line_length = pos;
     return buffer;
 }
@@ -1435,7 +1436,7 @@ char* read_dynamic_line(FILE* input, size_t* line_length) {
 void read_input(FILE* input, FILE* output, Queue* queue) {
     char* line;
     size_t line_length;
-    
+
     while ((line = read_dynamic_line(input, &line_length)) != NULL) {
         if (line_length > 0 && line[line_length - 1] == '\n') {
             line[line_length - 1] = '\0';
@@ -1443,35 +1444,35 @@ void read_input(FILE* input, FILE* output, Queue* queue) {
                 line[line_length - 2] = '\0';
             }
         }
-        
+
         if (line[0] == '\0') {
             free(line);
             cnt_free++;
             continue;
         }
-        
+
         if (strncmp(line, "insert", 6) == 0 && line[6] == ' ') {
             insert_db(line, output, queue);
-            
+
         } else if (strncmp(line, "select", 6) == 0 && line[6] == ' ') {
             select_db(line, output, queue);
-            
+
         } else if (strncmp(line, "delete", 6) == 0 && line[6] == ' ') {
             delete_db(line, output, queue);
-            
+
         } else if (strncmp(line, "update", 6) == 0 && line[6] == ' ') {
             update_db(line, output, queue);
-            
+
         } else if (strncmp(line, "uniq", 4) == 0 && line[4] == ' ') {
             uniq_db(line, output, queue);
-            
+
         } else if (strncmp(line, "sort", 4) == 0 && line[4] == ' ') {
             sort_db(line, output, queue);
-            
+
         } else {
             fprintf(output, "incorrect:'%.20s'\n", line);
         }
-        
+
         free(line);
         cnt_free++;
     }
@@ -1486,11 +1487,11 @@ void free_db(struct Queue* queue) {
         cnt_free++;
         current = next;
     }
-    
+
     queue->head = NULL;
     queue->tail = NULL;
     queue->size = 0;
-    
+
 }
 
 int main(void) {
@@ -1503,22 +1504,22 @@ int main(void) {
         if (memstat) fclose(memstat);
         return 1;
     }
-    
+
     struct Queue queue;
     init_queue(&queue);
-    
+
     read_input(input, output, &queue);
-    
+
     free_db(&queue);
-    
+
     fprintf(memstat, "malloc:%d\n", cnt_malloc);
     fprintf(memstat, "strdup:%d\n", cnt_strdup);
     fprintf(memstat, "realloc:%d\n", cnt_realloc);
     fprintf(memstat, "free:%d", cnt_free);
-    
+
     fclose(input);
     fclose(output);
     fclose(memstat);
-    
+
     return 0;
 }
