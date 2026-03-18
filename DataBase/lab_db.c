@@ -309,8 +309,7 @@ const char* status_to_string(Status s) {
     return "'unknown'";
 }
 
-char* next_token(char** src, char sep)
-{
+char* next_token(char** src, char sep) {
     if (!*src || !**src)
         return NULL;
 
